@@ -60,6 +60,19 @@ _LOGGER = logging.getLogger(__name__)
 MAX_TOOL_ITERATIONS = 20
 
 
+def _is_openclaw_model(model: str) -> bool:
+    """Return true if the request targets an OpenClaw agent model."""
+    return model == "openclaw" or model.startswith(("openclaw/", "openclaw:"))
+
+
+def _openclaw_headers(conversation_id: str | None) -> dict[str, str]:
+    """Build OpenClaw-specific compatibility headers."""
+    headers = {"x-openclaw-message-channel": "homeassistant"}
+    if conversation_id:
+        headers["x-openclaw-session-key"] = f"ha-assist:{conversation_id}"
+    return headers
+
+
 def _shorten_tool_call_id(tool_call_id: str) -> str:
     """Shorten tool call ID to exactly 9 alphanumeric characters as Mistral requires."""
     import hashlib
@@ -195,6 +208,7 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
         """Generate an answer for the chat log with streaming support."""
         options = self.subentry.data
         model = options.get(CONF_CHAT_MODEL, DEFAULT_CHAT_MODEL)
+        openclaw_model = _is_openclaw_model(model)
         max_function_calls = options.get(
             CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
             DEFAULT_MAX_FUNCTION_CALLS_PER_CONVERSATION,
@@ -222,8 +236,13 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
         api_kwargs: dict[str, Any] = {
             "model": model,
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
+        if chat_log.conversation_id:
+            api_kwargs["user"] = chat_log.conversation_id
+        if openclaw_model:
+            api_kwargs["extra_headers"] = _openclaw_headers(chat_log.conversation_id)
+        else:
+            api_kwargs["stream_options"] = {"include_usage": True}
 
         # Add token limit parameter based on model support
         max_tokens = options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
